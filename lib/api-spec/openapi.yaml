@@ -3,20 +3,21 @@ info:
   # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: Instagram downloader API
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: instagram
+    description: Instagram downloader operations
 paths:
   /healthz:
     get:
       operationId: healthCheck
       tags: [health]
       summary: Health check
-      description: Returns server health status
       responses:
         "200":
           description: Healthy
@@ -24,6 +25,114 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+  /instagram/reel:
+    post:
+      operationId: fetchReel
+      tags: [instagram]
+      summary: Fetch a reel or post by its public Instagram URL
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReelRequest"
+      responses:
+        "200":
+          description: Reel media metadata
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReelResponse"
+        "400":
+          description: Invalid URL
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Downloader provider not configured
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /instagram/stories:
+    post:
+      operationId: fetchStories
+      tags: [instagram]
+      summary: Fetch active stories for a public Instagram username
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StoriesRequest"
+      responses:
+        "200":
+          description: User's active stories
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StoriesResponse"
+        "400":
+          description: Invalid username
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: User not found or has no active stories
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Downloader provider not configured
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /instagram/profile:
+    post:
+      operationId: fetchProfile
+      tags: [instagram]
+      summary: Fetch public profile info for an Instagram username
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProfileRequest"
+      responses:
+        "200":
+          description: Profile information
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProfileResponse"
+        "404":
+          description: Profile not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Downloader provider not configured
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /instagram/status:
+    get:
+      operationId: providerStatus
+      tags: [instagram]
+      summary: Check whether the downloader provider is configured
+      responses:
+        "200":
+          description: Provider status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderStatus"
 components:
   schemas:
     HealthStatus:
@@ -31,6 +140,140 @@ components:
       properties:
         status:
           type: string
-      required:
-        - status
-
+      required: [status]
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+        details:
+          type: string
+      required: [error]
+    ProviderStatus:
+      type: object
+      properties:
+        configured:
+          type: boolean
+        provider:
+          type: string
+      required: [configured]
+    ReelRequest:
+      type: object
+      properties:
+        url:
+          type: string
+          description: Public Instagram reel/post URL
+      required: [url]
+    MediaItem:
+      type: object
+      properties:
+        type:
+          type: string
+          enum: [video, image]
+        url:
+          type: string
+          description: Direct media URL for download
+        thumbnail:
+          type: string
+        width:
+          type: integer
+        height:
+          type: integer
+        durationSec:
+          type: number
+      required: [type, url]
+    ReelResponse:
+      type: object
+      properties:
+        shortcode:
+          type: string
+        username:
+          type: string
+        userFullName:
+          type: string
+        userAvatar:
+          type: string
+        caption:
+          type: string
+        likeCount:
+          type: integer
+        commentCount:
+          type: integer
+        viewCount:
+          type: integer
+        takenAt:
+          type: string
+        media:
+          type: array
+          items:
+            $ref: "#/components/schemas/MediaItem"
+      required: [shortcode, media]
+    StoriesRequest:
+      type: object
+      properties:
+        username:
+          type: string
+      required: [username]
+    StoryItem:
+      type: object
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum: [video, image]
+        url:
+          type: string
+        thumbnail:
+          type: string
+        takenAt:
+          type: string
+        durationSec:
+          type: number
+      required: [id, type, url]
+    StoriesResponse:
+      type: object
+      properties:
+        username:
+          type: string
+        userFullName:
+          type: string
+        userAvatar:
+          type: string
+        stories:
+          type: array
+          items:
+            $ref: "#/components/schemas/StoryItem"
+      required: [username, stories]
+    ProfileRequest:
+      type: object
+      properties:
+        username:
+          type: string
+      required: [username]
+    ProfileResponse:
+      type: object
+      properties:
+        username:
+          type: string
+        fullName:
+          type: string
+        biography:
+          type: string
+        avatar:
+          type: string
+        avatarHd:
+          type: string
+        isPrivate:
+          type: boolean
+        isVerified:
+          type: boolean
+        followerCount:
+          type: integer
+        followingCount:
+          type: integer
+        postCount:
+          type: integer
+        externalUrl:
+          type: string
+      required: [username, fullName, avatar]

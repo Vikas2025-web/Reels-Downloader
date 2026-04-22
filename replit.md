@@ -24,4 +24,14 @@ pnpm workspace monorepo using TypeScript. Each package manages its own dependenc
 - `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
 - `pnpm --filter @workspace/api-server run dev` — run API server locally
 
+## Artifacts
+
+- `insta-grabber` (`/`) — Instagram Reels & Stories downloader web app (React + Vite).
+- `api-server` (`/api`) — shared Express API. Implements `/instagram/reel`, `/instagram/stories`, `/instagram/profile`, `/instagram/status` by proxying a RapidAPI scraper.
+
+## Required environment variables
+
+- `RAPIDAPI_KEY` — RapidAPI key for the Instagram scraper provider. Without it, the API returns 503 and the UI shows a configuration banner.
+- `RAPIDAPI_HOST` (optional) — defaults to `instagram-scraper-api2.p.rapidapi.com`.
+
 See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details.
