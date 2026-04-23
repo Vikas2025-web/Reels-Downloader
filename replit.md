@@ -32,6 +32,6 @@ pnpm workspace monorepo using TypeScript. Each package manages its own dependenc
 ## Required environment variables
 
 - `RAPIDAPI_KEY` — RapidAPI key for the Instagram scraper provider. Without it, the API returns 503 and the UI shows a configuration banner.
-- `RAPIDAPI_HOST` (optional) — defaults to `instagram-scraper-api2.p.rapidapi.com`.
+- `RAPIDAPI_HOST` (optional) — defaults to `instagram120.p.rapidapi.com`. Routes used: POST `/api/instagram/links` (reel/post by URL), POST `/api/instagram/stories` (by username), POST `/api/instagram/profile` (by username).
 
 See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details.
