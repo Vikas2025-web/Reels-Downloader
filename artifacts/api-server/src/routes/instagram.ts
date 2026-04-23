@@ -10,42 +10,12 @@ const router: IRouter = Router();
 
 const RAPIDAPI_KEY = process.env["RAPIDAPI_KEY"];
 const RAPIDAPI_HOST =
-  process.env["RAPIDAPI_HOST"] ?? "instagram-scraper-api2.p.rapidapi.com";
+  process.env["RAPIDAPI_HOST"] ?? "instagram120.p.rapidapi.com";
 
-const PROVIDER_NAME = "RapidAPI / instagram-scraper-api2";
+const PROVIDER_NAME = "RapidAPI / instagram120";
 
 function isConfigured(): boolean {
   return Boolean(RAPIDAPI_KEY);
-}
-
-async function rapidGet(
-  path: string,
-  params: Record<string, string>,
-): Promise<unknown> {
-  if (!RAPIDAPI_KEY) {
-    throw new ProviderError(
-      503,
-      "Downloader provider not configured. Set RAPIDAPI_KEY in environment to enable downloads.",
-    );
-  }
-  const qs = new URLSearchParams(params).toString();
-  const url = `https://${RAPIDAPI_HOST}${path}?${qs}`;
-  const r = await fetch(url, {
-    method: "GET",
-    headers: {
-      "x-rapidapi-key": RAPIDAPI_KEY,
-      "x-rapidapi-host": RAPIDAPI_HOST,
-    },
-  });
-  if (!r.ok) {
-    const text = await r.text().catch(() => "");
-    throw new ProviderError(
-      r.status === 404 ? 404 : 502,
-      `Provider request failed (${r.status}).`,
-      text.slice(0, 500),
-    );
-  }
-  return await r.json();
 }
 
 class ProviderError extends Error {
@@ -58,8 +28,52 @@ class ProviderError extends Error {
   }
 }
 
+async function rapidPost(path: string, body: Record<string, unknown>): Promise<unknown> {
+  if (!RAPIDAPI_KEY) {
+    throw new ProviderError(
+      503,
+      "Downloader provider not configured. Set RAPIDAPI_KEY in environment to enable downloads.",
+    );
+  }
+  const r = await fetch(`https://${RAPIDAPI_HOST}${path}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-rapidapi-key": RAPIDAPI_KEY,
+      "x-rapidapi-host": RAPIDAPI_HOST,
+    },
+    body: JSON.stringify(body),
+  });
+  const text = await r.text();
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    parsed = { raw: text };
+  }
+  if (!r.ok) {
+    const msg =
+      (parsed as { message?: string })?.message ??
+      `Provider error ${r.status}`;
+    throw new ProviderError(
+      r.status === 404 ? 404 : r.status === 401 || r.status === 403 ? 503 : 502,
+      msg,
+      text.slice(0, 400),
+    );
+  }
+  return parsed;
+}
+
 function sendError(res: Response, status: number, error: string, details?: string) {
   res.status(status).json(details ? { error, details } : { error });
+}
+
+function handleProviderError(req: Request, res: Response, e: unknown) {
+  if (e instanceof ProviderError) {
+    return sendError(res, e.status, e.message, e.details);
+  }
+  req.log?.error({ err: e }, "Instagram provider error");
+  return sendError(res, 500, "Unexpected error fetching from provider.");
 }
 
 function pick<T = unknown>(obj: unknown, ...keys: string[]): T | undefined {
@@ -97,48 +111,22 @@ router.get("/instagram/status", (_req, res) => {
   res.json(data);
 });
 
+// ---------- /instagram/reel — by URL ----------
 router.post("/instagram/reel", async (req: Request, res: Response) => {
   const parsed = FetchReelBody.safeParse(req.body);
-  if (!parsed.success) {
-    return sendError(res, 400, "Invalid request body.");
-  }
+  if (!parsed.success) return sendError(res, 400, "Invalid request body.");
   const url = parsed.data.url.trim();
   if (!/instagram\.com\//i.test(url)) {
     return sendError(res, 400, "Please enter a valid instagram.com URL.");
   }
   try {
-    const raw = await rapidGet("/v1/post_info", {
-      code_or_id_or_url: url,
-      include_insights: "true",
-    });
-    const data = (raw as { data?: unknown })?.data ?? raw;
-    const out = mapReel(data);
-    res.json(out);
-  } catch (e) {
-    return handleProviderError(req, res, e);
-  }
-});
-
-router.post("/instagram/stories", async (req: Request, res: Response) => {
-  const parsed = FetchStoriesBody.safeParse(req.body);
-  if (!parsed.success) {
-    return sendError(res, 400, "Invalid request body.");
-  }
-  const username = normalizeUsername(parsed.data.username);
-  if (!username || !/^[a-zA-Z0-9._]{1,40}$/.test(username)) {
-    return sendError(res, 400, "Please enter a valid Instagram username.");
-  }
-  try {
-    const raw = await rapidGet("/v1/stories", {
-      username_or_id_or_url: username,
-    });
-    const data = (raw as { data?: unknown })?.data ?? raw;
-    const out = mapStories(data, username);
-    if (!out.stories.length) {
+    const raw = await rapidPost("/api/instagram/links", { url });
+    const out = mapLinksResponse(raw);
+    if (!out.media.length) {
       return sendError(
         res,
         404,
-        "No active stories found for this user, or the account is private.",
+        "Could not extract any media from that link. The post may be private or removed.",
       );
     }
     res.json(out);
@@ -147,199 +135,169 @@ router.post("/instagram/stories", async (req: Request, res: Response) => {
   }
 });
 
-router.post("/instagram/profile", async (req: Request, res: Response) => {
-  const parsed = FetchProfileBody.safeParse(req.body);
-  if (!parsed.success) {
-    return sendError(res, 400, "Invalid request body.");
-  }
+function mapLinksResponse(raw: unknown): {
+  shortcode: string;
+  username?: string;
+  userFullName?: string;
+  userAvatar?: string;
+  caption?: string;
+  likeCount?: number;
+  commentCount?: number;
+  viewCount?: number;
+  takenAt?: string;
+  media: Array<Record<string, unknown>>;
+} {
+  const arr = Array.isArray(raw) ? raw : [];
+  const first = (arr[0] ?? {}) as Record<string, unknown>;
+  const meta = (first["meta"] ?? {}) as Record<string, unknown>;
+  const urls = Array.isArray(first["urls"])
+    ? (first["urls"] as Array<Record<string, unknown>>)
+    : [];
+
+  const media = urls
+    .map((u) => {
+      const url = u["url"] as string | undefined;
+      if (!url) return undefined;
+      const ext = ((u["extension"] as string | undefined) ?? "").toLowerCase();
+      const name = ((u["name"] as string | undefined) ?? "").toLowerCase();
+      const isVideo =
+        ext === "mp4" || ext === "mov" || name.includes("mp4") || name.includes("video");
+      return {
+        type: isVideo ? "video" : "image",
+        url,
+        thumbnail: undefined as string | undefined,
+      };
+    })
+    .filter(Boolean) as Array<Record<string, unknown>>;
+
+  return {
+    shortcode: (meta["shortcode"] as string | undefined) ?? "media",
+    caption: meta["title"] as string | undefined,
+    likeCount: meta["likeCount"] as number | undefined,
+    commentCount: meta["commentCount"] as number | undefined,
+    takenAt: toIso(meta["takenAt"]),
+    media,
+  };
+}
+
+// ---------- /instagram/stories — by username ----------
+router.post("/instagram/stories", async (req: Request, res: Response) => {
+  const parsed = FetchStoriesBody.safeParse(req.body);
+  if (!parsed.success) return sendError(res, 400, "Invalid request body.");
   const username = normalizeUsername(parsed.data.username);
   if (!username || !/^[a-zA-Z0-9._]{1,40}$/.test(username)) {
     return sendError(res, 400, "Please enter a valid Instagram username.");
   }
   try {
-    const raw = await rapidGet("/v1/info", {
-      username_or_id_or_url: username,
-    });
-    const data = (raw as { data?: unknown })?.data ?? raw;
-    const out = mapProfile(data, username);
-    if (!out.username) {
-      return sendError(res, 404, "Profile not found.");
+    const [storiesRaw, profileRaw] = await Promise.all([
+      rapidPost("/api/instagram/stories", { username }),
+      rapidPost("/api/instagram/profile", { username }).catch(() => null),
+    ]);
+    const items = Array.isArray((storiesRaw as { result?: unknown })?.result)
+      ? ((storiesRaw as { result: unknown[] }).result as unknown[])
+      : [];
+    const stories = items
+      .map((it) => mapStoryItem(it))
+      .filter((s): s is Record<string, unknown> => Boolean(s));
+    if (!stories.length) {
+      return sendError(
+        res,
+        404,
+        "No active stories found for this user, or the account is private.",
+      );
     }
-    res.json(out);
+    const profile = (profileRaw as { result?: Record<string, unknown> } | null)?.result;
+    res.json({
+      username:
+        (profile?.["username"] as string | undefined) ?? username,
+      userFullName: profile?.["full_name"] as string | undefined,
+      userAvatar:
+        (profile?.["profile_pic_url_hd"] as string | undefined) ??
+        (profile?.["profile_pic_url"] as string | undefined),
+      stories,
+    });
   } catch (e) {
     return handleProviderError(req, res, e);
   }
 });
 
-function handleProviderError(req: Request, res: Response, e: unknown) {
-  if (e instanceof ProviderError) {
-    return sendError(res, e.status, e.message, e.details);
-  }
-  req.log?.error({ err: e }, "Instagram provider error");
-  return sendError(res, 500, "Unexpected error fetching from provider.");
-}
+function mapStoryItem(it: unknown): Record<string, unknown> | undefined {
+  if (!it || typeof it !== "object") return undefined;
+  const item = it as Record<string, unknown>;
+  const videoVersions = item["video_versions"] as
+    | Array<{ url?: string; width?: number; height?: number }>
+    | undefined;
+  const candidates =
+    (item["image_versions2"] as { candidates?: Array<{ url?: string; width?: number; height?: number }> } | undefined)
+      ?.candidates ?? [];
 
-function mapReel(data: unknown): Record<string, unknown> {
-  const d = (data ?? {}) as Record<string, unknown>;
-  const user = (pick(d, "user", "owner", "author") as Record<string, unknown>) ?? {};
-  const shortcode =
-    (pick(d, "code", "shortcode", "id") as string | undefined) ?? "unknown";
-
-  const media: Array<Record<string, unknown>> = [];
-  const carousel = pick<unknown[]>(d, "carousel_media", "resources", "children");
-  if (Array.isArray(carousel) && carousel.length > 0) {
-    for (const item of carousel) {
-      const m = mapMediaItem(item);
-      if (m) media.push(m);
-    }
-  } else {
-    const m = mapMediaItem(d);
-    if (m) media.push(m);
-  }
-
-  return {
-    shortcode,
-    username: pick(user, "username") as string | undefined,
-    userFullName: pick(user, "full_name", "fullName") as string | undefined,
-    userAvatar: pick(user, "profile_pic_url", "profile_pic_url_hd", "avatar") as
-      | string
-      | undefined,
-    caption:
-      (pick(d, "caption_text") as string | undefined) ??
-      ((pick(d, "caption") as Record<string, unknown> | string | undefined) &&
-      typeof pick(d, "caption") === "object"
-        ? (pick(pick(d, "caption"), "text") as string | undefined)
-        : (pick(d, "caption") as string | undefined)),
-    likeCount: pick(d, "like_count", "likes") as number | undefined,
-    commentCount: pick(d, "comment_count", "comments") as number | undefined,
-    viewCount: pick(d, "play_count", "view_count", "views") as number | undefined,
-    takenAt: toIso(pick(d, "taken_at", "taken_at_ts", "taken_at_timestamp")),
-    media,
-  };
-}
-
-function mapMediaItem(item: unknown): Record<string, unknown> | undefined {
-  if (!item || typeof item !== "object") return undefined;
-  const it = item as Record<string, unknown>;
-  const isVideo = Boolean(
-    pick(it, "is_video") ??
-      pick(it, "video_url") ??
-      pick(it, "video_versions"),
-  );
-  const videoVersions = pick<unknown[]>(it, "video_versions");
-  const imageVersions =
-    pick<{ items?: unknown[] }>(it, "image_versions2")?.items ??
-    pick<unknown[]>(it, "image_versions") ??
-    [];
-
+  const isVideo = Array.isArray(videoVersions) && videoVersions.length > 0;
   let url: string | undefined;
   if (isVideo) {
-    url =
-      (Array.isArray(videoVersions) && videoVersions[0] && typeof videoVersions[0] === "object"
-        ? ((videoVersions[0] as Record<string, unknown>)["url"] as string | undefined)
-        : undefined) ??
-      (pick(it, "video_url") as string | undefined);
+    url = videoVersions![0]?.url;
   }
   if (!url) {
-    url =
-      (Array.isArray(imageVersions) &&
-      imageVersions[0] &&
-      typeof imageVersions[0] === "object"
-        ? ((imageVersions[0] as Record<string, unknown>)["url"] as string | undefined)
-        : undefined) ??
-      (pick(it, "display_url", "thumbnail_url", "image_url") as string | undefined);
+    url = candidates[0]?.url;
   }
   if (!url) return undefined;
-
-  const thumb =
-    (Array.isArray(imageVersions) &&
-    imageVersions[0] &&
-    typeof imageVersions[0] === "object"
-      ? ((imageVersions[0] as Record<string, unknown>)["url"] as string | undefined)
-      : undefined) ??
-    (pick(it, "thumbnail_url", "display_url") as string | undefined);
-
+  const thumb = candidates[0]?.url;
+  const id =
+    ((item["pk"] ?? item["id"]) as string | number | undefined)?.toString() ??
+    Math.random().toString(36).slice(2);
   return {
+    id,
     type: isVideo ? "video" : "image",
     url,
     thumbnail: thumb,
-    width: pick(it, "original_width", "width") as number | undefined,
-    height: pick(it, "original_height", "height") as number | undefined,
-    durationSec: pick(it, "video_duration", "duration") as number | undefined,
+    takenAt: toIso(item["taken_at"]),
   };
 }
 
-function mapStories(data: unknown, username: string): {
-  username: string;
-  userFullName?: string;
-  userAvatar?: string;
-  stories: Array<Record<string, unknown>>;
-} {
-  const d = (data ?? {}) as Record<string, unknown>;
-  const items =
-    (pick<unknown[]>(d, "items", "stories", "data")) ??
-    (pick<{ items?: unknown[] }>(d, "reel")?.items as unknown[] | undefined) ??
-    [];
-  const user =
-    (pick(d, "user") as Record<string, unknown> | undefined) ??
-    ((pick(d, "reel") as Record<string, unknown> | undefined)?.["user"] as
-      | Record<string, unknown>
-      | undefined) ??
-    {};
-
-  const stories: Array<Record<string, unknown>> = [];
-  if (Array.isArray(items)) {
-    for (const item of items) {
-      if (!item || typeof item !== "object") continue;
-      const m = mapMediaItem(item);
-      if (!m) continue;
-      const id =
-        (pick(item, "id", "pk") as string | number | undefined)?.toString() ??
-        Math.random().toString(36).slice(2);
-      stories.push({
-        id,
-        type: m["type"],
-        url: m["url"],
-        thumbnail: m["thumbnail"],
-        durationSec: m["durationSec"],
-        takenAt: toIso(pick(item, "taken_at", "taken_at_timestamp")),
-      });
-    }
+// ---------- /instagram/profile — by username ----------
+router.post("/instagram/profile", async (req: Request, res: Response) => {
+  const parsed = FetchProfileBody.safeParse(req.body);
+  if (!parsed.success) return sendError(res, 400, "Invalid request body.");
+  const username = normalizeUsername(parsed.data.username);
+  if (!username || !/^[a-zA-Z0-9._]{1,40}$/.test(username)) {
+    return sendError(res, 400, "Please enter a valid Instagram username.");
   }
+  try {
+    const raw = await rapidPost("/api/instagram/profile", { username });
+    const result = (raw as { result?: Record<string, unknown> })?.result;
+    if (!result) {
+      return sendError(res, 404, "Profile not found.");
+    }
+    res.json(mapProfile(result, username));
+  } catch (e) {
+    return handleProviderError(req, res, e);
+  }
+});
 
+function mapProfile(u: Record<string, unknown>, username: string): Record<string, unknown> {
+  const followers = (
+    (u["edge_followed_by"] as { count?: number } | undefined) ??
+    (u["followers"] as { count?: number } | undefined)
+  )?.count;
+  const following = (
+    (u["edge_follow"] as { count?: number } | undefined) ??
+    (u["following"] as { count?: number } | undefined)
+  )?.count;
+  const posts = (u["edge_owner_to_timeline_media"] as { count?: number } | undefined)?.count;
   return {
-    username:
-      (pick(user, "username") as string | undefined) ?? username,
-    userFullName: pick(user, "full_name", "fullName") as string | undefined,
-    userAvatar: pick(user, "profile_pic_url", "profile_pic_url_hd") as
-      | string
-      | undefined,
-    stories,
-  };
-}
-
-function mapProfile(data: unknown, username: string): Record<string, unknown> {
-  const d = (data ?? {}) as Record<string, unknown>;
-  const u = (pick(d, "user") as Record<string, unknown> | undefined) ?? d;
-  return {
-    username: (pick(u, "username") as string | undefined) ?? username,
-    fullName: (pick(u, "full_name", "fullName") as string | undefined) ?? "",
-    biography: pick(u, "biography", "bio") as string | undefined,
+    username: (u["username"] as string | undefined) ?? username,
+    fullName: (u["full_name"] as string | undefined) ?? "",
+    biography: u["biography"] as string | undefined,
     avatar:
-      (pick(u, "profile_pic_url") as string | undefined) ??
-      (pick(u, "profile_pic_url_hd") as string | undefined) ??
+      (u["profile_pic_url_hd"] as string | undefined) ??
+      (u["profile_pic_url"] as string | undefined) ??
       "",
-    avatarHd: pick(u, "profile_pic_url_hd") as string | undefined,
-    isPrivate: pick(u, "is_private") as boolean | undefined,
-    isVerified: pick(u, "is_verified") as boolean | undefined,
-    followerCount: pick(u, "follower_count", "edge_followed_by") as
-      | number
-      | undefined,
-    followingCount: pick(u, "following_count", "edge_follow") as
-      | number
-      | undefined,
-    postCount: pick(u, "media_count") as number | undefined,
-    externalUrl: pick(u, "external_url") as string | undefined,
+    avatarHd: u["profile_pic_url_hd"] as string | undefined,
+    isPrivate: u["is_private"] as boolean | undefined,
+    isVerified: u["is_verified"] as boolean | undefined,
+    followerCount: followers,
+    followingCount: following,
+    postCount: posts ?? (u["media_count"] as number | undefined),
+    externalUrl: u["external_url"] as string | undefined,
   };
 }
 
