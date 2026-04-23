@@ -1,0 +1,8 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "RAyIDrsYoJYxbFY3YsRM2"
+uri = "file://exports/insta-grabber.zip"
+type = "unspecified"
+title = "InstaGrabber — Full Project (zip)"
