@@ -3,8 +3,15 @@ import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Smartphone, Laptop, CheckCircle2, ArrowRight } from "lucide-react";
+import { useSeo } from "@/lib/seo";
 
 export default function HowItWorks() {
+  useSeo({
+    title: "How to Download Instagram Reels & Stories — InstaGrabber",
+    description:
+      "Step-by-step guide to download Instagram Reels, Posts and Stories on mobile and desktop. Free, no login required, works in any browser.",
+    path: "/how-it-works",
+  });
   return (
     <Layout>
       <div className="container mx-auto max-w-4xl px-4 py-16 md:py-24">

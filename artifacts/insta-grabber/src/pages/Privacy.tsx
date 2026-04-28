@@ -2,8 +2,15 @@ import { Layout } from "@/components/layout/Layout";
 import { Link } from "wouter";
 import { ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useSeo } from "@/lib/seo";
 
 export default function Privacy() {
+  useSeo({
+    title: "Privacy Policy & Terms — InstaGrabber",
+    description:
+      "InstaGrabber's privacy policy and terms of use. We do not store your data, do not require an account, and only fetch publicly available media.",
+    path: "/privacy",
+  });
   return (
     <Layout>
       <div className="container mx-auto max-w-3xl px-4 py-16 md:py-24">

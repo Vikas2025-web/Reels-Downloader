@@ -2,8 +2,14 @@ import { Layout } from "@/components/layout/Layout";
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
 import { SearchX, ArrowLeft } from "lucide-react";
+import { useSeo } from "@/lib/seo";
 
 export default function NotFound() {
+  useSeo({
+    title: "Page Not Found — InstaGrabber",
+    description: "The page you are looking for does not exist on InstaGrabber.",
+    path: "/404",
+  });
   return (
     <Layout>
       <div className="flex flex-col items-center justify-center flex-1 text-center px-4 py-20">
