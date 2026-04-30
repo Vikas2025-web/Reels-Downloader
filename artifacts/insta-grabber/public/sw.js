@@ -1,4 +1,4 @@
-const CACHE = "instagrabber-v1";
+const CACHE = "instagrabber-v2";
 const PRECACHE = ["/", "/manifest.webmanifest", "/icon.svg", "/favicon.svg"];
 
 self.addEventListener("install", (event) => {

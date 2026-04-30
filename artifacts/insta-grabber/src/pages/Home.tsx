@@ -6,8 +6,15 @@ import { ProfileLookup } from "@/components/ProfileLookup";
 import { ProviderStatusBanner } from "@/components/ProviderStatusBanner";
 import { Video, Disc, CheckCircle2 } from "lucide-react";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
+import { useSeo } from "@/lib/seo";
 
 export default function Home() {
+  useSeo({
+    title: "InstaGrabber — Free Instagram Reels, Stories & Posts Downloader",
+    description:
+      "Download Instagram Reels, Stories and Posts in HD for free. No login, no watermark, no app install. Paste a link or username and grab any public media in seconds.",
+    path: "/",
+  });
   return (
     <Layout>
       <div className="container mx-auto max-w-5xl px-4 py-12 md:py-20 flex-1">
